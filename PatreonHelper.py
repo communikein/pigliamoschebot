@@ -1,3 +1,4 @@
+import logging
 import requests
 import urllib.parse
 
@@ -19,6 +20,16 @@ class PatreonInfo():
         self._creator_token = creator_token
         self._creator_refresh_token = creator_refresh_token
 
+        logging.basicConfig(
+            filename='/home/communikeintest/logs/pigliamoschebot.log', 
+            encoding='utf-8', 
+            filemode='a', 
+            style="{", 
+            datefmt="%Y-%m-%d %H:%M", 
+            format="{asctime}# {levelname} - {name}.{funcName} - {message}",
+            level = logging.DEBUG)
+        self.__logger = logging.getLogger(__name__)
+
     """ Get user access token """
     def get_access_token(self, user_code, webhook_refresh_token, debug=False):
         
@@ -32,7 +43,7 @@ class PatreonInfo():
             'grant_type': 'authorization_code',
             'redirect_uri': webhook_refresh_token
         }
-        if debug: print('DEBUG - PatreonInfo.get_access_token() - ', data)
+        if debug: self.__logger.debug(data)
 
         response = requests.post(url, data=data, headers=headers)
         response_code = response.status_code
@@ -41,8 +52,8 @@ class PatreonInfo():
         if response_data and all(field in response_data.keys() for field in ['access_token', 'refresh_token']):
             return response_data['access_token'], response_data['refresh_token']
         else:
-            print('ERROR - PatreonInfo.get_access_token() - Error fetching user access and refresh tokens.')
-            if debug: print(f'DEBUG - PatreonInfo.get_access_token() - Details: {response_code} - {response_data}')
+            self.__logger.error('Error fetching user access and refresh tokens.')
+            if debug: self.__logger.debug(f'Details: {response_code} - {response_data}')
             return None, None
     
     """ Check if user is a currently paying patron """
@@ -74,12 +85,14 @@ class PatreonInfo():
 
         # Parse patron user id
         patron_user_id = data.get("data", {}).get("id", None)
+        if debug: self.__logger.debug(f'Patron user ID: {patron_user_id}')
 
         # Parse creators info
         creators_raw = [item for item in data.get("included", []) if item["type"] == "user"]
         creators = {}
         for item in creators_raw:
             creators[item.get('id')] = item.get("attributes", {})
+        if debug: self.__logger.debug(f'Creators info: {creators}')
         
         # Parse campaigns info
         campaigns_raw = [item for item in data.get("included", []) if item["type"] == "campaign"]
@@ -91,6 +104,7 @@ class PatreonInfo():
                 'creator_id': creator_id,
                 'creator_info': creators[creator_id]
             }
+        if debug: self.__logger.debug(f'Campaigns info: {campaigns}')
 
         # Parse memberships info
         memberships_raw = [item for item in data.get("included", []) if item["type"] == "member"]
@@ -115,6 +129,7 @@ class PatreonInfo():
                         'amount_cents': None
                     } for tier in tiers_id_raw]
                 }
+        if debug: self.__logger.debug(f'Memberships info: {memberships}')
 
         # Parse tiers info
         tiers_raw = [item for item in data.get("included", []) if item["type"] == "tier"]
@@ -126,14 +141,14 @@ class PatreonInfo():
             tiers[tier_id] = {
                 'amount_cents': tier_amount_cents
             }
+        if debug: self.__logger.debug(f'Tiers info: {tiers}')
         
         # Combine all info
         for membership_id in memberships:
             for tier in memberships[membership_id]['tier']:
                 tier_selected = tiers[tier['id']]
                 tier['amount_cents'] = tier_selected['amount_cents']
-        
-        if debug: print('DEBUG - PatreonInfo.check_subscribed() - memberships:', memberships)
+        self.__logger.info(f'Pledges information: {memberships}')
         
         return patron_user_id, memberships
 
@@ -154,9 +169,7 @@ class PatreonInfo():
         if not token: token = self._creator_token
 
         url = 'https://www.patreon.com/api/oauth2/v2/webhooks'
-        headers = {
-            'Authorization': f'Bearer {token}'
-        }
+        headers = {'Authorization': f'Bearer {token}'}
         params = {
             "fields[webhook]": "last_attempted_at,num_consecutive_times_failed,paused,secret,triggers,uri",
         }
@@ -167,15 +180,15 @@ class PatreonInfo():
         if data and 'data' in data:
             if len(data['data']) > 0:
                 events_subscribed = data['data']
-                print(f'INFO - PatreonHelper.get_events_subscribed() - Found {len(events_subscribed)} events.')
-                if debug: print(f'DEBUG - PatreonHelper.get_events_subscribed() - Details: {events_subscribed}')
+                self.__logger.info(f'Found {len(events_subscribed)} events.')
+                if debug: self.__logger.debug(f'Details: {events_subscribed}')
                 return events_subscribed
             else:
-                print('INFO - PatreonHelper.get_events_subscribed() - Found 0 events.')
+                self.__logger.info('Found 0 events.')
                 return []
         else:
-            print('ERROR - PatreonHelper.get_events_subscribed() - Error fetching event subscription details.')
-            if debug: print(f'DEBUG - PatreonHelper.get_events_subscribed() - Details: {data}')
+            self.__logger.error('Error fetching event subscription details.')
+            if debug: self.__logger.debug(f'Details: {data}')
             return None
 
     """ Register a webhook for channel subscription end. """
@@ -186,7 +199,7 @@ class PatreonInfo():
 
         # If webhook already registered, do not register a new one
         events_subscribed = self.get_events_subscribed(token=token)
-        if debug: print("DEBUG - PatreonHelper.register_unsubscribe_webhook() - Already registered webhooks:", events_subscribed)
+        if debug: self.__logger.debug("Already registered webhooks:", events_subscribed)
         if events_subscribed and [e for e in events_subscribed if e['attributes']['uri'] == callback_webhook]:
             return 409, None
 
@@ -213,13 +226,13 @@ class PatreonInfo():
         response = requests.post(url, json=data, headers=headers)
         response_json = response.json()
         response_code = response.status_code
-        print("INFO - PatreonHelper.register_unsubscribe_webhook() - Registering the user unsubscribed event:", response_code, "-", response_json)
+        self.__logger.info("Registering the user unsubscribed event:", response_code, "-", response_json)
 
         return response_code, response_json
     
     """ Delete a webhook by ID. """
     def delete_webhook(self, webhook_id, token=None, debug=False):
-        print(f'INFO - PatreonHelper.delete_webhook() - Deleting webhook id {webhook_id}.')
+        self.__logger.info(f'Deleting webhook id {webhook_id}.')
 
         if not token: token = self._creator_token
 
@@ -230,16 +243,16 @@ class PatreonInfo():
         response_code = response.status_code
 
         if response_code == 204:
-            print(f'INFO - PatreonHelper.delete_webhook() - SUCCESS: deleted webhook id {webhook_id}.')
+            self.__logger.info(f'Deleted webhook id {webhook_id}.')
             return True
         else:
-            print(f'ERROR - PatreonHelper.delete_webhook() - Error deleting webhook id {webhook_id}.')
-            if debug: print(f'DEBUG - PatreonHelper.get_events_subscribed() - Details: {response_code} - {response.json()}')
+            self.__logger.error(f'Error deleting webhook id {webhook_id}.')
+            if debug: self.__logger.debug(f'Details: {response_code} - {response.json()}')
             return False
     
     """ Delete all webhooks. """
     def delete_all_webhooks(self):
-        print(f'INFO - PatreonHelper.delete_webhook() - Deleting all webhooks.')
+        self.__logger.info('Deleting all webhooks.')
 
         webhooks = self.get_events_subscribed()
 

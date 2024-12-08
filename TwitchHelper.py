@@ -1,3 +1,4 @@
+import logging
 import requests
 import urllib.parse
 
@@ -20,6 +21,16 @@ class TwitchInfo():
         self._channel_id = channel_id
         self._channel_username = channel_username
 
+        logging.basicConfig(
+            filename='/home/communikeintest/logs/pigliamoschebot.log', 
+            encoding='utf-8', 
+            filemode='a', 
+            style="{", 
+            datefmt="%Y-%m-%d %H:%M", 
+            format="{asctime}# {levelname} - {name}.{funcName} - {message}",
+            level = logging.DEBUG)
+        self.__logger = logging.getLogger(__name__)
+
 
     """ Get user token """
     def get_user_access_token(self, code, callback_webhook, debug=False):
@@ -35,13 +46,13 @@ class TwitchInfo():
 
         response = requests.post(url, params=params)
         data = response.json()
-        if debug: print('DEBUG - TwitchHelper.get_user_access_token() - ', data)
+        if debug: self.__logger.debug(data)
 
         if data and all(field in data.keys() for field in ['access_token', 'refresh_token']):
             return data['access_token'], data['refresh_token']
         else:
-            print('ERROR - TwitchHelper.get_user_access_token() - Error fetching user access and refresh tokens.')
-            if debug: print(f'DEBUG - TwitchHelper.get_user_access_token() - Details: {data}')
+            self.__logger.error('Error fetching user access and refresh tokens.')
+            if debug: self.__logger.debug(f'Details: {data}')
             return None, None
 
     """ Get app token """
@@ -55,13 +66,13 @@ class TwitchInfo():
 
         response = requests.post(url, data=data)
         data = response.json()
-        if debug: print('DEBUG - TwitchHelper.get_app_access_token() - ', data)
+        if debug: self.__logger.debug(data)
 
         if data and 'access_token' in data:
             return data['access_token']
         else:
-            print('ERROR - TwitchHelper.get_app_access_token() - Error fetching app access token.')
-            if debug: print(f'Details: {data}')
+            self.__logger.error('Error fetching app access token.')
+            if debug: self.__logger.debug(f'Details: {data}')
             return None
 
     """ Get channel ID and username """
@@ -75,14 +86,14 @@ class TwitchInfo():
         params = {'login': self._channel_username}
         response = requests.get(url, headers=headers, params=params)
         data = response.json()
-        if debug: print('DEBUG - TwitchHelper.get_channel_data() - ', data)
+        if debug: self.__logger.debug(data)
 
         if 'data' in data and 'id' in data['data'][0]:
             id = data['data'][0]['id']
             return self._channel_username, id
         else:
-            print('ERROR - TwitchHelper.get_channel_data() - Error fetching channel ID.')
-            if debug: print(f'DEBUG - TwitchHelper.get_channel_data() - Details: {data}')
+            self.__logger.error('Error fetching channel ID.')
+            if debug: self.__logger.debug(f'Details: {data}')
             return None, None
 
     """ Get user ID and username """
@@ -97,15 +108,15 @@ class TwitchInfo():
 
         response = requests.get(url, headers=headers, params=params)
         data = response.json()
-        if debug: print('DEBUG - TwitchHelper.get_user_data() - ', data)
+        if debug: self.__logger.debug(data)
 
         if 'user_id' in data:
             id = data['user_id']
             username = data['login']
             return username, id
         else:
-            print('ERROR - TwitchHelper.get_user_data() - Error fetching user ID.')
-            if debug: print(f'DEBUG - TwitchHelper.get_user_data() - Details: {data}')
+            self.__logger.error('Error fetching user ID.')
+            if debug: self.__logger.debug(f'Details: {data}')
             return None, None
 
     """ Check if user is subscribed to channel """
@@ -122,13 +133,14 @@ class TwitchInfo():
 
         response = requests.get(url, headers=headers, params=params)
         data = response.json()
+        if debug: self.__logger.debug(data)
 
         if 'data' in data:
             subscription_details = data
             return subscription_details
         else:
-            print('ERROR - TwitchHelper.check_subscribed() - Error fetching subscription details.')
-            if debug: print(f'DEBUG - TwitchHelper.check_subscribed() - Details: {data}')
+            self.__logger.error('Error fetching subscription details.')
+            if debug: self.__logger.debug(f'Details: {data}')
             return None
 
     """ Get list of events with webhook subscribed """
@@ -144,26 +156,26 @@ class TwitchInfo():
 
         response = requests.get(url, headers=headers)
         data = response.json()
-        if debug: print(data)
+        if debug: self.__logger.debug(data)
 
         if 'data' in data:
             if len(data['data']) > 0:
                 events_subscribed = data['data']
                 if not any_status:
                     events_subscribed = [event for event in data['data'] if event['status'] == 'enabled']
-                print(f'INFO - TwitchHelper.get_events_subscribed() - Found {len(events_subscribed)} events.')
-                if debug: print(f'Details: {events_subscribed}')
+                self.__logger.info(f'Found {len(events_subscribed)} events.')
+                if debug: self.__logger.debug(f'Details: {events_subscribed}')
                 return events_subscribed
             else:
-                print('INFO - TwitchHelper.get_events_subscribed() - Found 0 events.')
+                self.__logger.info('Found 0 events.')
                 return []
         else:
-            print('ERROR - TwitchHelper.get_events_subscribed() - Error fetching event subscription details.')
-            if debug: print(f'DEBUG - TwitchHelper.get_events_subscribed() - Details: {data}')
+            self.__logger.error('Error fetching event subscription details.')
+            if debug: self.__logger.debug(f'Details: {data}')
             return None
 
     """ Register a webhook for channel subscription end. """
-    def register_unsubscribe_webhook(self, callback_webhook):
+    def register_unsubscribe_webhook(self, callback_webhook, debug=False):
 
         event_type = "channel.subscription.end"
 
@@ -173,6 +185,7 @@ class TwitchInfo():
         # If webhook already subscribed, return
         events_subscribed = self.get_events_subscribed(token=app_access_token)
         if events_subscribed and [e for e in events_subscribed if e['type'] == event_type and e['transport']['callback'] == callback_webhook]:
+            self.__logger.info('Webhook already registered')
             return 202, None
 
         # If webhook not already subscribed, subscribe to webhook
@@ -193,9 +206,12 @@ class TwitchInfo():
             },
         }
         response = requests.post(url, json=data, headers=headers)
-        print("INFO - TwitchHelper.register_unsubscribe_webhook() - Trying to register the user unsubscribed event -", response.json())
+        response_code = response.status_code
+        response_data = response.json()
+        self.__logger.info('Trying to register the user unsubscribed event')
+        if debug: self.__logger.debug(response_data)
 
-        return response.status_code, response.json()
+        return response_code, response_data
 
     """ Return the link to verify if a user is subscribed """
     def get_verify_subscription_link(self, callback_webhook, state_csrf):

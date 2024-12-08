@@ -63,6 +63,17 @@ WEBHOOK_PATREON_OAUTH = URL_BASE + PATH_PATREON_OAUTH
 WEBHOOK_PATREON_REFRESH_TOKEN = URL_BASE + PATH_PATREON_REFRESH_TOKEN
 WEBHOOK_PATREON_USER_UNSUBSCRIBED = URL_BASE + PATH_PATREON_USER_UNSUBSCRIBED
 
+logging.basicConfig(
+    filename='/home/communikeintest/logs/pigliamoschebot.log', 
+    encoding='utf-8', 
+    filemode='a', 
+    style="{", 
+    datefmt="%Y-%m-%d %H:%M", 
+    format="{asctime}# {levelname} - {name}.{funcName} - {message}",
+    level = logging.DEBUG)
+logger = logging.getLogger(__name__)
+
+# TODO: Update bot logger to use system logger
 def init_telegram():
 
     global BOT_MESSAGE_WELCOME, BOT_MESSAGE_PLATFORM_CHECK, BOT_PLATFORM_CHOICE, BOT_JOIN_TELEGRAM_GROUP
@@ -138,14 +149,12 @@ def init_twitch():
         channel_id=int(twitch_channel_id) \
     )
     webhook_registration_result_code, webhook_registration_result_data = twitch_info.register_unsubscribe_webhook(WEBHOOK_TWITCH_USER_UNSUBSCRIBED)
-    message = ''
     if webhook_registration_result_code == 202:
-        message = 'SUCCESSFULLY subscribed to Twitch event \'user unsubscribed\'.\n'
+        logger.info('Subscribed to Twitch event \'user unsubscribed\'')
     elif webhook_registration_result_code == 409:
-        message = 'Already subscribed to Twitch event \'user unsubscribed\'.\n'
+        logger.info('Already subscribed to Twitch event \'user unsubscribed\'')
     else:
-        message = f'Unknown error: {webhook_registration_result_data}'
-    if DEBUG: print(f'INFO - main() - {message}')
+        logger.error(f'Unknown error: {webhook_registration_result_data}')
 
     return twitch_info
 
@@ -176,14 +185,12 @@ def init_patreon():
         campaign_id=patreon_creator_campaign_id, 
         debug=DEBUG
     )
-    message = ''
     if webhook_registration_result_code == 201:
-        message = 'Successfully subscribed to Patreon event \'user unsubscribed\'.\n'
+        logger.info('Subscribed to Patreon event \'user unsubscribed\'')
     elif webhook_registration_result_code == 409:
-        message = 'Already subscribed to Patreon event \'user unsubscribed\'.\n'
+        logger.info('Already subscribed to Patreon event \'user unsubscribed\'')
     else:
-        message = f'Unknown error: {webhook_registration_result_data}'
-    if DEBUG: print(f'INFO - main() - {message}')
+        logger.error(f'Unknown error: {webhook_registration_result_data}')
 
     return patreon_info
 
@@ -205,7 +212,7 @@ def index():
 def http_request_home():
     if flask.request.headers.get('content-type') == 'application/json':
         json_string = flask.request.get_data().decode('utf-8')
-        print('DEBUG /telegram - bot received message - ', json_string)
+        if DEBUG: logger.debug('Bot received message - ', json_string)
         update = telebot.types.Update.de_json(json_string)
         if update: bot.process_new_updates([update])
 
@@ -219,7 +226,7 @@ def http_request_home():
 # 
 @flask_app.route(PATH_TWITCH_OAUTH, methods=["GET", "POST"])
 def webhook_twitch_user_oauth():
-    if DEBUG: print('INFO - webhook_twitch_user_oauth() - Received user oauth from Twitch')
+    if DEBUG: logger.debug('endpoint called')
 
     # Get query parameters from the URL
     params = flask.request.args
@@ -233,7 +240,7 @@ def webhook_twitch_user_oauth():
     telegram_chat_id = user_info[1]
 
     # Log the incoming query parameters for demonstration
-    if DEBUG: print(f"Received query parameters: {params}")
+    if DEBUG: logger.debug(f"Received query parameters: {params}")
 
     # Get the auth (and refresh) token for this user
     access_token, _ = twitch_info.get_user_access_token(user_code, WEBHOOK_TWITCH_REFRESH_TOKEN, debug=True)
@@ -251,18 +258,17 @@ def webhook_twitch_user_oauth():
 
         # If user has already created invite links, revoke them before creating a new one
         user_invite_links = database.find_links_by_telegram_id(telegram_user_id)
-        print(user_invite_links)
         for link in user_invite_links or []:
             result = bot.revoke_chat_invite_link(GROUP_CHAT_ID, link)
             if result.is_revoked:
-                print('INFO - telegram - link revoked succesfully')
-                print('INFO - database - removing link')
+                logger.info('Invite link revoked succesfully')
+                logger.info('Removing invite link from database')
                 if database.remove_link(link):
-                    print('INFO - database - link removed successfully')
+                    logger.info('Invite link removed successfully from database')
                 else:
-                    print('ERROR - database - could not remove link')
+                    logger.error('Could not remove invite link from database')
             else:
-                print(f'ERROR - telegram - could not revoke link: {link}')
+                logger.error(f'Could not revoke invite link: {link}')
 
         # Create a single-use invite link
         invite = bot.create_chat_invite_link(
@@ -289,7 +295,7 @@ def webhook_twitch_user_oauth():
 # 
 @flask_app.route(PATH_TWITCH_OAUTH_CHANNEL, methods=['GET'])
 def webhook_twitch_channel_oauth():
-    print('INFO - webhook_twitch_channel_oauth() - endpoint called')
+    if DEBUG: logger.debug('endpoint called')
 
     # Get query parameters from the URL
     params = flask.request.args
@@ -297,7 +303,7 @@ def webhook_twitch_channel_oauth():
     scope = params['scope']
 
     # Log the incoming parameters
-    if DEBUG: print(f"Received parameters: {params}")
+    if DEBUG: logger.debug(f"Received parameters: {params}")
 
     # Get the auth (and refresh) token for this user
     access_token, refresh_token = twitch_info.get_user_access_token(user_code, WEBHOOK_TWITCH_REFRESH_TOKEN)
@@ -314,7 +320,7 @@ def webhook_twitch_channel_oauth():
 # 
 @flask_app.route(PATH_TWITCH_REFRESH_TOKEN, methods=['GET'])
 def webhook_twitch_refresh_token():
-    print('INFO - webhook_twitch_refresh_token() - endpoint called')
+    if DEBUG: logger.debug('endpoint called')
 
     # Get query parameters from the URL
     params = flask.request.args
@@ -324,12 +330,14 @@ def webhook_twitch_refresh_token():
 # Handle user unsubscribed from channel (subscription expired or manually removed) 
 # More info on this webhook at https://dev.twitch.tv/docs/eventsub/eventsub-subscription-types/#channelsubscriptionend
 @flask_app.route(PATH_TWITCH_USER_UNSUBSCRIBED, methods=["POST"])
-def twitch_user_unsubscribed():
+def webhook_twitch_user_unsubscribed():
+    if DEBUG: logger.debug('endpoint called')
+
     data = flask.request.json
 
     # If this is Twitch verifying the webhook, verify it and return
     if data and data['subscription']['status'] == 'webhook_callback_verification_pending':
-        print('INFO - Received a request to verify the webhook for "channel.subscription.end" event from Twitch.')
+        logger.info('Received a request to verify the webhook for "channel.subscription.end" event from Twitch.')
         return data['challenge'], 200
 
     # If this is a "user unsubscribed" event, process it
@@ -356,7 +364,7 @@ def twitch_user_unsubscribed():
             # Since this webhook gets triggered whether or not a user is part of the Telegram group, 
             # we need to handle the case where the user is not part of the group
             if e.description.conatins('PARTICIPANT_ID_INVALID'):
-                print(f"INFO - twitch_user_unsubscribed() - {unsubscribed_user_username} unsubscribed from Twitch, " \
+                logger.info(f"{unsubscribed_user_username} unsubscribed from Twitch, " \
                     "but was not part of the Telegram group. More data available here:", data)
             else:
                 raise e
@@ -376,13 +384,13 @@ def twitch_user_unsubscribed():
 # 
 @flask_app.route(PATH_PATREON_OAUTH, methods=["GET", "POST"])
 def webhook_patreon_user_oauth():
-    if DEBUG: print('INFO - webhook_patreon_user_oauth() - Received user oauth from Patreon')
+    if DEBUG: logger.debug('endpoint called')
 
     # Get query parameters from the URL
     params = flask.request.args
     user_code = params['code']
     csrf_token = params['state']
-    if DEBUG: print(f"DEBUG - webhook_patreon_user_oauth() - Received query parameters: {params}")
+    if DEBUG: logger.debug(f"Received query parameters: {params}")
 
     # Get context information from CSRF token
     user_info = database.find_user_info_from_session(csrf_token)
@@ -404,18 +412,17 @@ def webhook_patreon_user_oauth():
 
         # If user has already created invite links, revoke them before creating a new one
         user_invite_links = database.find_links_by_telegram_id(telegram_user_id)
-        print(user_invite_links)
         for link in user_invite_links or []:
             result = bot.revoke_chat_invite_link(GROUP_CHAT_ID, link)
             if result.is_revoked:
-                print('INFO - telegram - link revoked succesfully')
-                print('INFO - database - removing link')
+                logger.info('Invite link revoked succesfully')
+                logger.info('Removing invite link from database')
                 if database.remove_link(link):
-                    print('INFO - database - link removed successfully')
+                    logger.info('Invite link removed successfully from database')
                 else:
-                    print('ERROR - database - could not remove link')
+                    logger.error('Could not remove invite link from database')
             else:
-                print(f'ERROR - telegram - could not revoke link: {link}')
+                logger.error(f'Could not revoke invite link: {link}')
 
         # Create a single-use invite link
         invite = bot.create_chat_invite_link(
@@ -437,34 +444,12 @@ def webhook_patreon_user_oauth():
     else:
         bot.send_message(telegram_chat_id, BOT_SUBSCRIPTION_NOT_ACTIVE, parse_mode='HTML')
 
-    return ''
-
-    print('INFO - webhook_twitch_channel_oauth() - endpoint called')
-
-    # Get query parameters from the URL
-    params = flask.request.args
-    user_code = params['code']
-    scope = params['scope']
-
-    # Log the incoming parameters
-    if DEBUG: print(f"Received parameters: {params}")
-
-    # Get the auth (and refresh) token for this user
-    access_token, refresh_token = twitch_info.get_user_access_token(user_code, WEBHOOK_TWITCH_REFRESH_TOKEN)
-    # Get the app access token
-    app_access_token = twitch_info.get_app_access_token()
-
-    # Get the username and ID for both the channel and the user
-    user_username, user_id = twitch_info.get_user_data(access_token)
-    channel_username, channel_id = twitch_info.get_channel_data(access_token)
-
-    # Return result
     return '', 200
 
 # 
 @flask_app.route(PATH_PATREON_REFRESH_TOKEN, methods=['GET'])
 def webhook_patreon_refresh_token():
-    print('INFO - webhook_twitch_refresh_token() - endpoint called')
+    if DEBUG: logger.debug('endpoint called')
 
     # Get query parameters from the URL
     params = flask.request.args
@@ -475,10 +460,12 @@ def webhook_patreon_refresh_token():
 # More info on this webhook at https://docs.patreon.com/#apiv2-webhook-endpoints
 @flask_app.route(PATH_PATREON_USER_UNSUBSCRIBED, methods=["POST"])
 def webhook_patreon_user_unsubscribed():
+    if DEBUG: logger.debug('endpoint called')
+
     data = flask.request.json
     headers = flask.request.headers
 
-    print('INFO - main.webhook_patreon_user_unsubscribed() - Received a Patreon webhook:', headers, "-", data)
+    logger.info('Received a Patreon webhook:', headers, "-", data)
 
     # If this is Twitch verifying the webhook, verify it and return
     if data and data['subscription']['status'] == 'webhook_callback_verification_pending':
@@ -495,7 +482,7 @@ def webhook_patreon_user_unsubscribed():
 # Handle '/start' 
 @bot.message_handler(commands=['start'])
 def command_start(message):
-    if DEBUG: print('DEBUG - bot - /start command received')
+    if DEBUG: logger.debug('DEBUG - bot - /start command received')
 
     # Define inline buttons for reply options
     keyboard = [
@@ -520,19 +507,19 @@ def handle_join_chat_request(message: telebot.types.ChatJoinRequest):
 
             result = bot.revoke_chat_invite_link(GROUP_CHAT_ID, used_invite_link)
             if result.is_revoked:
-                print('INFO - telegram - link revoked succesfully')
-                print('INFO - database - removing link')
+                logger.info('Invite link revoked succesfully')
+                logger.info('Removing invite link from database')
                 if database.remove_link(used_invite_link):
-                    print('INFO - database - link removed successfully')
+                    logger.info('Invite link removed from database')
                 else:
-                    print('ERROR - database - could not remove link')
+                    logger.error('Could not remove invite link from database')
                 
                 if database.remove_user_session(user_id):
-                    print('INFO - database - user session removed successfully')
+                    logger.info('User session removed from database')
                 else:
-                    print('ERROR - database - could not remove user session')
+                    logger.error('Could not remove user session')
             else:
-                print(f'ERROR - telegram - could not revoke link: {used_invite_link}')
+                logger.error(f'Could not revoke invite link: {used_invite_link}')
 
         else:
             bot.decline_chat_join_request(GROUP_CHAT_ID, user_id)
@@ -540,7 +527,7 @@ def handle_join_chat_request(message: telebot.types.ChatJoinRequest):
             try:
                 bot.send_message(user_id, BOT_USER_TRIED_CHEATING)
             except ApiTelegramException as e:
-                print("ERROR - bot - sending message to user trying to sneak in failed with error:", e)
+                logger.error(f"Sending message to user trying to sneak in failed with error: {e}")
             return
 
 
@@ -563,13 +550,13 @@ def helper_add_me(bot, requesting_user_id, chat_id):
 
 @bot.callback_query_handler(func=lambda call: True, data=['add_me'])
 def callback_query_add_me(call: telebot.types.CallbackQuery):
-    if DEBUG: print(f'DEBUG - callback_query_addme() - "Lo sono" button pressed: {call.data}')
+    if DEBUG: logger.debug(f'"Lo sono" button pressed: {call.data}')
     
     helper_add_me(bot, requesting_user_id=call.from_user.id, chat_id=call.message.chat.id)
 
 @bot.message_handler(commands=['add_me'])
 def command_add_me(message: telebot.types.Message):
-    if DEBUG: print(f'DEBUG - command_add_me() - Command "add-me" received: {message}')
+    if DEBUG: logger.debug(f'Command "add-me" received: {message}')
 
     requesting_user_id = message.from_user.id if message.from_user else None
     helper_add_me(bot, requesting_user_id=requesting_user_id, chat_id=message.chat.id)
@@ -601,14 +588,14 @@ def helper_platform_choice(bot, platform, user_id, chat_id):
 # User requested to verify via TWITCH
 @bot.callback_query_handler(func=lambda call: True, data=['platform_twitch'])
 def callback_query_platform_twitch(call: telebot.types.CallbackQuery):
-    if DEBUG: print(f'DEBUG - bot - "Twitch" button pressed: {call.data}')
+    if DEBUG: logger.debug(f'"Twitch" button pressed: {call.data}')
 
     helper_platform_choice(bot, "Twitch", call.from_user.id, call.message.chat.id)
 
 # User requested to verify via TWITCH
 @bot.message_handler(commands=['add_me_twitch'])
 def command_platform_twitch(message: telebot.types.Message):
-    if DEBUG: print(f'DEBUG - command_platform_twitch() - Command "add_me_twitch" received: {message}')
+    if DEBUG: logger.debug(f'Command "add_me_twitch" received: {message}')
 
     requesting_user_id = message.from_user.id if message.from_user else None
     # Check if user requesting the invite link is already a member of the group
@@ -622,14 +609,14 @@ def command_platform_twitch(message: telebot.types.Message):
 # User requested to verify via PATREON
 @bot.callback_query_handler(func=lambda call: True, data=['platform_patreon'])
 def callback_query_platform_patreon(call: telebot.types.CallbackQuery):
-    if DEBUG: print(f'DEBUG - bot - "Patreon" button pressed: {call.data}')
+    if DEBUG: logger.debug(f'"Patreon" button pressed: {call.data}')
 
     helper_platform_choice(bot, "Patreon", call.from_user.id, call.message.chat.id)
 
 # User requested to verify via PATREON
 @bot.message_handler(commands=['add_me_patreon'])
 def command_platform_patreon(message: telebot.types.Message):
-    if DEBUG: print(f'DEBUG - command_platform_patreon() - Command "add_me_patreon" received: {message}')
+    if DEBUG: logger.debug(f'Command "add_me_patreon" received: {message}')
 
     requesting_user_id = message.from_user.id if message.from_user else None
     # Check if user requesting the invite link is already a member of the group
@@ -643,7 +630,7 @@ def command_platform_patreon(message: telebot.types.Message):
 # User requested to verify via YOUTUBE
 @bot.callback_query_handler(func=lambda call: True, data=['platform_youtube'])
 def callback_query_platform_youtube(call: telebot.types.CallbackQuery):
-    if DEBUG: print(f'DEBUG - bot - "Youtube" button pressed: {call.data}')
+    if DEBUG: logger.debug(f'"Youtube" button pressed: {call.data}')
 
     #message_html = BOT_PLATFORM_CHOICE.format(platform='Youtube', link=VERIFY_SUBSCRIPTION_LINK)
     message_html = "Il reame di <b>Youtube</b>non è ancora pronto per essere utilizzato."
@@ -652,7 +639,7 @@ def callback_query_platform_youtube(call: telebot.types.CallbackQuery):
 
 @bot.callback_query_handler(func=lambda call: True, data=['finish'])
 def callback_query_finish(call: telebot.types.CallbackQuery):
-    if DEBUG: print(f'DEBUG - bot - "Non lo sono" button pressed: {call.data}')
+    if DEBUG: logger.debug(f'"Non lo sono" button pressed: {call.data}')
 
     bot.answer_callback_query(call.id, "Answer is No")
 
@@ -667,11 +654,11 @@ def on_user_removed(message: telebot.types.Message):
         try:
             bot.send_message(message.left_chat_member.id, BOT_REMOVED_FROM_CHAT)
         except ApiTelegramException as e:
-            print("ERROR - bot - sending message to user kicked off of chat failed with error:", e)
+            logger.error(f"Sending message to user kicked off of chat failed with error: {e}")
         return
 
     else:
-        print("INFO - bot - Ignoring request coming from chat", message.chat.id)
+        logger.info(f"Ignoring request coming from chat {message.chat.id}")
 
 # This handler removes all service messages
 @bot.message_handler(content_types=telebot.util.content_type_service)
