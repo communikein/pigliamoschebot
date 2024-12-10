@@ -212,7 +212,7 @@ def index():
 def http_request_home():
     if flask.request.headers.get('content-type') == 'application/json':
         json_string = flask.request.get_data().decode('utf-8')
-        if DEBUG: logger.debug('Bot received message - ', json_string)
+        if DEBUG: logger.debug(f'Bot received message - {json_string}')
         update = telebot.types.Update.de_json(json_string)
         if update: bot.process_new_updates([update])
 
@@ -465,7 +465,7 @@ def webhook_patreon_user_unsubscribed():
     data = flask.request.json
     headers = flask.request.headers
 
-    logger.info('Received a Patreon webhook:', headers, "-", data)
+    logger.info(f'Received a Patreon webhook: {headers} - {data}')
 
     # If this is Twitch verifying the webhook, verify it and return
     if data and data['subscription']['status'] == 'webhook_callback_verification_pending':

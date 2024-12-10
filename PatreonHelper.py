@@ -199,7 +199,7 @@ class PatreonInfo():
 
         # If webhook already registered, do not register a new one
         events_subscribed = self.get_events_subscribed(token=token)
-        if debug: self.__logger.debug("Already registered webhooks:", events_subscribed)
+        if debug: self.__logger.debug(f"Already registered webhooks: {events_subscribed}")
         if events_subscribed and [e for e in events_subscribed if e['attributes']['uri'] == callback_webhook]:
             return 409, None
 
@@ -226,11 +226,12 @@ class PatreonInfo():
         response = requests.post(url, json=data, headers=headers)
         response_json = response.json()
         response_code = response.status_code
-        self.__logger.info("Registering the user unsubscribed event:", response_code, "-", response_json)
+        self.__logger.info(f"Registering the user unsubscribed event: {response_code} - {response_json}")
 
         return response_code, response_json
     
     """ Delete a webhook by ID. """
+    # curl -H 'Authorization: Bearer {TOKEN}' -X DELETE https://www.patreon.com/api/oauth2/v2/webhooks/{ID}
     def delete_webhook(self, webhook_id, token=None, debug=False):
         self.__logger.info(f'Deleting webhook id {webhook_id}.')
 
