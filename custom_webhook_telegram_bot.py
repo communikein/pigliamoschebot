@@ -363,7 +363,7 @@ def webhook_twitch_user_unsubscribed():
         except ApiTelegramException as e:
             # Since this webhook gets triggered whether or not a user is part of the Telegram group, 
             # we need to handle the case where the user is not part of the group
-            if e.description.contains('PARTICIPANT_ID_INVALID'):
+            if 'PARTICIPANT_ID_INVALID' in e.description:
                 logger.info(f"{unsubscribed_user_username} unsubscribed from Twitch, " \
                     "but was not part of the Telegram group. More data available here:", data)
             else:
