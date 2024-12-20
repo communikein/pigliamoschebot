@@ -2,6 +2,9 @@ import logging
 import requests
 import urllib.parse
 
+PLATFORM = 'platform-patreon'
+PLATFORM_NAME = 'Patreon'
+
 class PatreonInfo():
 
     __verify_subscription_link = 'https://patreon.com/oauth2/authorize' \

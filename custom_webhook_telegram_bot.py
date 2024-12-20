@@ -8,7 +8,6 @@ import time
 import string
 import random
 import datetime
-import requests
 
 import flask
 
@@ -19,8 +18,8 @@ import telebot.custom_filters as TelebotCustomFilters
 from telebot.apihelper import ApiTelegramException
 
 import database
-from TwitchHelper import TwitchInfo
-from PatreonHelper import PatreonInfo
+import TwitchHelper
+import PatreonHelper
 
 """ Filter to check data content """
 class DataMatchFilter(TelebotCustomFilters.AdvancedCustomFilter):
@@ -45,26 +44,30 @@ DEBUG = True
 
 HOSTNAME = 'communikeintest.pythonanywhere.com'
 if DEVELOPMENT: HOSTNAME = 'humorous-bison-flowing.ngrok-free.app'
-URL_BASE = "https://%s" % (HOSTNAME)
+URL_BASE = f"https://{HOSTNAME}"
 PATH_HOME = "/"
 PATH_TELEGRAM = "/telegram"
-PATH_TWITCH_OAUTH = "/twitch-oauth-user"
-PATH_TWITCH_OAUTH_CHANNEL = "/twitch-oauth-channel"
+PATH_TWITCH_OAUTH = "/twitch-oauth"
+PATH_TWITCH_VERIFY = "/twitch-verify"
+PATH_TWITCH_OAUTH_CHANNEL = "/twitch-channel-oauth"
 PATH_TWITCH_REFRESH_TOKEN = "/twitch-refresh-token"
-PATH_TWITCH_USER_UNSUBSCRIBED = "/twitch-user-unsubscribed"
+PATH_TWITCH_USER_UNSUBSCRIBED = "/twitch-unsubscribed"
 PATH_PATREON_OAUTH = "/patreon-oauth-user"
 PATH_PATREON_REFRESH_TOKEN = "/patreon-refresh-token"
 PATH_PATREON_USER_UNSUBSCRIBED = "/patreon-user-unsubscribed"
 WEBHOOK_TELEGRAM = URL_BASE + PATH_TELEGRAM
 WEBHOOK_TWITCH_OAUTH = URL_BASE + PATH_TWITCH_OAUTH
+WEBHOOK_TWITCH_VERIFY = URL_BASE + PATH_TWITCH_VERIFY
 WEBHOOK_TWITCH_REFRESH_TOKEN = URL_BASE + PATH_TWITCH_REFRESH_TOKEN
 WEBHOOK_TWITCH_USER_UNSUBSCRIBED = URL_BASE + PATH_TWITCH_USER_UNSUBSCRIBED
 WEBHOOK_PATREON_OAUTH = URL_BASE + PATH_PATREON_OAUTH
 WEBHOOK_PATREON_REFRESH_TOKEN = URL_BASE + PATH_PATREON_REFRESH_TOKEN
 WEBHOOK_PATREON_USER_UNSUBSCRIBED = URL_BASE + PATH_PATREON_USER_UNSUBSCRIBED
 
+logs_file_path = '/home/communikeintest/logs/pigliamoschebot.log'
+if DEVELOPMENT: logs_file_path = './pigliamoschebot.log'
 logging.basicConfig(
-    filename='/home/communikeintest/logs/pigliamoschebot.log', 
+    filename=logs_file_path, 
     encoding='utf-8', 
     filemode='a', 
     style="{", 
@@ -141,7 +144,7 @@ def init_twitch():
     twitch_channel_id = os.getenv("TWITCH_CHANNEL_ID", None)
     if not twitch_channel_id: raise EnvVariableNotFound('ERROR - init_twitch() - "TWITCH_CHANNEL_ID" environment variable not found')
 
-    twitch_info = TwitchInfo( \
+    twitch_info = TwitchHelper.TwitchInfo( \
         client_id=twitch_client_id, \
         client_secret=twitch_client_secret, \
         twitch_secret=twitch_secret, \
@@ -173,7 +176,7 @@ def init_patreon():
     patreon_creator_campaign_id = os.getenv("PATREON_CREATOR_CAMPAIGN_ID", None)
     if not patreon_creator_campaign_id: raise EnvVariableNotFound('ERROR - init_patreon() - "PATREON_CREATOR_CAMPAIGN_ID" environment variable not found')
 
-    patreon_info = PatreonInfo( \
+    patreon_info = PatreonHelper.PatreonInfo( \
         client_id=patreon_client_id, \
         client_secret=patreon_client_secret, \
         creator_id=patreon_creator_id, \
@@ -196,10 +199,10 @@ def init_patreon():
 
 twitch_info = init_twitch()
 patreon_info = init_patreon()
-flask_app = flask.Flask(__name__)
 database.check_or_create_db()
 csrf_user_link_mapping = dict()
 bot, GROUP_CHAT_ID = init_telegram()
+flask_app = flask.Flask(__name__)
 
 # Empty webserver index, return nothing, just http 200
 @flask_app.route(PATH_HOME, methods=['GET', 'HEAD'])
@@ -238,9 +241,10 @@ def webhook_twitch_user_oauth():
     user_info = database.find_user_info_from_session(csrf_token)
     telegram_user_id = user_info[0]
     telegram_chat_id = user_info[1]
+    platform_chosen = user_info[2]
 
     # Log the incoming query parameters for demonstration
-    if DEBUG: logger.debug(f"Received query parameters: {params}")
+    logger.debug(f"Received query parameters: {params}")
 
     # Get the auth (and refresh) token for this user
     access_token, _ = twitch_info.get_user_access_token(user_code, WEBHOOK_TWITCH_REFRESH_TOKEN, debug=True)
@@ -287,10 +291,46 @@ def webhook_twitch_user_oauth():
 
         bot.send_message(telegram_chat_id, BOT_JOIN_TELEGRAM_GROUP.format(invite.invite_link))
 
+        return 'Your membership has been verified :D', 200
+
     else:
         bot.send_message(telegram_chat_id, BOT_SUBSCRIPTION_NOT_ACTIVE, parse_mode='HTML')
 
+        return 'Your membership has NOT been verified :(', 200
+
     return ''
+
+# 
+@flask_app.route(PATH_TWITCH_VERIFY, methods=['GET'])
+def webhook_twitch_verify():
+    if DEBUG: logger.debug('endpoint called')
+
+    # Get query parameters from the URL
+    params = flask.request.args
+    csrf_token = params['token']
+
+    # Log the incoming parameters
+    if DEBUG: logger.debug(f"Received parameters: {params}")
+    
+    # Get context information from CSRF token
+    user_info = database.find_user_info_from_session(csrf_token)
+    platform_chosen = user_info[2]
+
+    if platform_chosen == TwitchHelper.PLATFORM:
+        verify_link = twitch_info.get_verify_subscription_link(
+            callback_webhook = WEBHOOK_TWITCH_OAUTH,
+            state_csrf = str(csrf_token)
+        )
+    elif platform_chosen == PatreonHelper.PLATFORM:
+        verify_link = patreon_info.get_verify_subscription_link(
+            callback_webhook = WEBHOOK_PATREON_OAUTH,
+            state_csrf = str(csrf_token)
+        )
+    
+    if DEBUG: logger.debug(f"Platform chosen: {platform_chosen}")
+    if DEBUG: logger.debug(f"Verify link: {verify_link}")
+
+    return flask.redirect(verify_link), 302
 
 # 
 @flask_app.route(PATH_TWITCH_OAUTH_CHANNEL, methods=['GET'])
@@ -360,6 +400,8 @@ def webhook_twitch_user_unsubscribed():
             time.sleep(0.5)
             bot.unban_chat_member(GROUP_CHAT_ID, unsubscribed_user_id, only_if_banned=True)
 
+            logger.info(f"{unsubscribed_user_username} unsubscribed from Twitch, removing it from the Telegram group.")
+
         except ApiTelegramException as e:
             # Since this webhook gets triggered whether or not a user is part of the Telegram group, 
             # we need to handle the case where the user is not part of the group
@@ -396,6 +438,7 @@ def webhook_patreon_user_oauth():
     user_info = database.find_user_info_from_session(csrf_token)
     telegram_user_id = user_info[0]
     telegram_chat_id = user_info[1]
+    platform_chosen = user_info[2]
 
     # Get the auth token for this user
     access_token, _ = patreon_info.get_access_token(
@@ -465,12 +508,13 @@ def webhook_patreon_user_unsubscribed():
     data = flask.request.json
     headers = flask.request.headers
 
-    logger.info(f'Received a Patreon webhook: {headers} - {data}')
+    logger.info(f'Received a Patreon webhook: {headers}{data}')
 
-    # If this is Twitch verifying the webhook, verify it and return
-    if data and data['subscription']['status'] == 'webhook_callback_verification_pending':
-        
-        return data['challenge'], 200
+    patreon_user_id = [info['id'] for info in data['data']['attributes'] if info['type'] == 'user'][0]
+    patreon_user_name = data['data']['attributes']['full_name']
+    patreon_user_email = data['data']['attributes']['email']
+
+    logger.info(f'Patreon user not paid subscriber anymore: {patreon_user_id} - {patreon_user_name} - {patreon_user_email}')
 
     return 'ignored', 200
 
@@ -500,8 +544,10 @@ def handle_join_chat_request(message: telebot.types.ChatJoinRequest):
     user_id = message.from_user.id
     if user_id != bot.bot_id:
         used_invite_link = message.invite_link.invite_link if message.invite_link else None
+        logger.info(f'{message.from_user.username} is using {used_invite_link} to request to join the group.')
 
         if used_invite_link and database.user_owns_link(user_id, used_invite_link):
+            logger.info(f'{message.from_user.username} owns {used_invite_link}.')
             bot.approve_chat_join_request(GROUP_CHAT_ID, user_id)
             bot.send_message(GROUP_CHAT_ID, BOT_WELCOME_TO_GROUP.format(message.from_user.username))
 
@@ -522,6 +568,7 @@ def handle_join_chat_request(message: telebot.types.ChatJoinRequest):
                 logger.error(f'Could not revoke invite link: {used_invite_link}')
 
         else:
+            logger.info(f'{message.from_user.username} does NOT own {used_invite_link}.')
             bot.decline_chat_join_request(GROUP_CHAT_ID, user_id)
 
             try:
@@ -562,35 +609,23 @@ def command_add_me(message: telebot.types.Message):
     helper_add_me(bot, requesting_user_id=requesting_user_id, chat_id=message.chat.id)
 
 
-def helper_platform_choice(bot, platform, user_id, chat_id):
+def get_platform_verify_link(platform, from_user_id, chat_id):
     csrf_token = ''.join(random.choices(string.ascii_letters, k=32))
-        
-    database.store_session(telegram_user_id=user_id, telegram_chat_from_id=chat_id, session_id=csrf_token)
-    user_info = database.find_user_info_from_session(csrf_token)
-    print(user_info)
+    database.store_session(telegram_user_id=from_user_id, telegram_chat_from_id=chat_id, platform=platform, session_id=csrf_token)
+    verify_link = f'{WEBHOOK_TWITCH_VERIFY}?token={csrf_token}'
 
-    
-    platform_link = None
-    if platform == 'Twitch':
-        platform_link = twitch_info.get_verify_subscription_link(
-            callback_webhook = WEBHOOK_TWITCH_OAUTH,
-            state_csrf = str(csrf_token)
-        )
-    elif platform == 'Patreon':
-        platform_link = patreon_info.get_verify_subscription_link(
-            callback_webhook = WEBHOOK_PATREON_OAUTH,
-            state_csrf = str(csrf_token)
-        )
+    logger.info(f'Storing verify link {verify_link} for user {from_user_id}')
 
-    message_html = BOT_PLATFORM_CHOICE.format(platform=platform, link=platform_link)
-    bot.send_message(chat_id, message_html, parse_mode='HTML')
+    return verify_link
 
 # User requested to verify via TWITCH
 @bot.callback_query_handler(func=lambda call: True, data=['platform_twitch'])
 def callback_query_platform_twitch(call: telebot.types.CallbackQuery):
     if DEBUG: logger.debug(f'"Twitch" button pressed: {call.data}')
 
-    helper_platform_choice(bot, "Twitch", call.from_user.id, call.message.chat.id)
+    verify_link = get_platform_verify_link(TwitchHelper.PLATFORM, call.from_user.id, call.message.chat.id)
+    message_html = BOT_PLATFORM_CHOICE.format(platform=TwitchHelper.PLATFORM_NAME, link=verify_link)
+    bot.send_message(call.message.chat.id, message_html, parse_mode='HTML')
 
 # User requested to verify via TWITCH
 @bot.message_handler(commands=['add_me_twitch'])
@@ -598,20 +633,29 @@ def command_platform_twitch(message: telebot.types.Message):
     if DEBUG: logger.debug(f'Command "add_me_twitch" received: {message}')
 
     requesting_user_id = message.from_user.id if message.from_user else None
+    message_html = None
     # Check if user requesting the invite link is already a member of the group
     group_chat_member = bot.get_chat_member(GROUP_CHAT_ID, requesting_user_id) if requesting_user_id else None
     if group_chat_member and group_chat_member.status in ['member', 'restricted', 'administrator', 'creator']:
-        bot.send_message(message.chat.id, BOT_ALREADY_JOINED_GROUP)
+        message_html = BOT_ALREADY_JOINED_GROUP
 
     else:
-        helper_platform_choice(bot, "Twitch", requesting_user_id, message.chat.id)
+        csrf_token = ''.join(random.choices(string.ascii_letters, k=32))
+        database.store_session(telegram_user_id=requesting_user_id, telegram_chat_from_id=message.chat.id, platform=TwitchHelper.PLATFORM, session_id=csrf_token)
+
+        verify_link = f'{WEBHOOK_TWITCH_VERIFY}?token={csrf_token}'
+        message_html = BOT_PLATFORM_CHOICE.format(platform=TwitchHelper.PLATFORM_NAME, link=verify_link)
+
+    bot.send_message(message.chat.id, message_html, parse_mode='HTML')
 
 # User requested to verify via PATREON
 @bot.callback_query_handler(func=lambda call: True, data=['platform_patreon'])
 def callback_query_platform_patreon(call: telebot.types.CallbackQuery):
     if DEBUG: logger.debug(f'"Patreon" button pressed: {call.data}')
 
-    helper_platform_choice(bot, "Patreon", call.from_user.id, call.message.chat.id)
+    verify_link = get_platform_verify_link(PatreonHelper.PLATFORM, call.from_user.id, call.message.chat.id)
+    message_html = BOT_PLATFORM_CHOICE.format(platform=PatreonHelper.PLATFORM_NAME, link=verify_link)
+    bot.send_message(call.message.chat.id, message_html, parse_mode='HTML')
 
 # User requested to verify via PATREON
 @bot.message_handler(commands=['add_me_patreon'])
@@ -621,11 +665,15 @@ def command_platform_patreon(message: telebot.types.Message):
     requesting_user_id = message.from_user.id if message.from_user else None
     # Check if user requesting the invite link is already a member of the group
     group_chat_member = bot.get_chat_member(GROUP_CHAT_ID, requesting_user_id) if requesting_user_id else None
+    message_html = None
     if group_chat_member and group_chat_member.status in ['member', 'restricted', 'administrator', 'creator']:
-        bot.send_message(message.chat.id, BOT_ALREADY_JOINED_GROUP)
+        message_html = BOT_ALREADY_JOINED_GROUP
 
     else:
-        helper_platform_choice(bot, "Patreon", requesting_user_id, message.chat.id)
+        verify_link = get_platform_verify_link(PatreonHelper.PLATFORM, requesting_user_id, message.chat.id)
+        message_html = BOT_PLATFORM_CHOICE.format(platform=PatreonHelper.PLATFORM_NAME, link=verify_link)
+
+    bot.send_message(message.chat.id, message_html, parse_mode='HTML')
 
 # User requested to verify via YOUTUBE
 @bot.callback_query_handler(func=lambda call: True, data=['platform_youtube'])
@@ -684,4 +732,9 @@ if __name__ == '__main__':
     WEBHOOK_LISTEN = '127.0.0.1'  # In some VPS you may need to put here the IP addr
 
     # Start flask server
-    flask_app.run(host=WEBHOOK_LISTEN, port=WEBHOOK_PORT, debug=True)
+    flask_app.run(
+        host=WEBHOOK_LISTEN, 
+        port=WEBHOOK_PORT, 
+        debug=DEBUG, 
+        use_reloader=False      # set to False to prevent it from running twice when in debug mode.
+    )

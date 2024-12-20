@@ -1,7 +1,7 @@
 import sqlite3
 import os
 
-DB_NAME = "./invite_links_v5.db"
+DB_NAME = "./invite_links_v6.db"
 
 TABLE_LINK_INFO_NAME = "LinkInfo"
 CREATE_TABLE_LINK_INFO = f"""
@@ -19,6 +19,7 @@ CREATE_TABLE_USER_SESSIONS = f"""
         row_id INTEGER PRIMARY KEY AUTOINCREMENT,
         telegram_user_id INTEGER NOT NULL,
         telegram_chat_from_id INTEGER NOT NULL,
+        platform TEXT NOT NULL,
         session_id TEXT NOT NULL
     )
 """
@@ -110,10 +111,10 @@ def remove_link(invite_link):
 
 
 # Store an object in the database
-def store_session(telegram_user_id, telegram_chat_from_id, session_id):
+def store_session(telegram_user_id, telegram_chat_from_id, platform, session_id):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute(f"INSERT INTO {TABLE_USER_SESSION_NAME} (telegram_user_id, telegram_chat_from_id, session_id) VALUES (?, ?, ?)", (telegram_user_id, telegram_chat_from_id, session_id))
+    cursor.execute(f"INSERT INTO {TABLE_USER_SESSION_NAME} (telegram_user_id, telegram_chat_from_id, platform, session_id) VALUES (?, ?, ?, ?)", (telegram_user_id, telegram_chat_from_id, platform, session_id))
     conn.commit()
     conn.close()
 
@@ -130,7 +131,7 @@ def retrieve_all_sessions():
 def find_user_info_from_session(session_id):
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute(f"SELECT telegram_user_id, telegram_chat_from_id, session_id FROM {TABLE_USER_SESSION_NAME} WHERE session_id = ?", (session_id,))
+    cursor.execute(f"SELECT telegram_user_id, telegram_chat_from_id, platform FROM {TABLE_USER_SESSION_NAME} WHERE session_id = ?", (session_id,))
     records = cursor.fetchall()
     conn.close()
     return records[0]

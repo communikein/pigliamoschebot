@@ -2,13 +2,16 @@ import logging
 import requests
 import urllib.parse
 
+PLATFORM = 'platform-twitch'
+PLATFORM_NAME = 'Twitch'
+
 class TwitchInfo():
 
     #TODO: Fix 400 Error "Missing Response Type": https://discuss.dev.twitch.com/t/how-to-resolve-missing-response-type/37674
 
     __verify_subscription_link = 'https://id.twitch.tv/oauth2/authorize' \
         '?client_id={client_id}' \
-        '&force_verify=true' \
+        '&force_verify=false' \
         '&response_type=code' \
         '&scope=user:read:subscriptions' \
         '&redirect_uri={redirect_uri}' \
